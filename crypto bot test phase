@@ -60,8 +60,8 @@ tracemalloc.start()
 # Load environment variables from .env file
 load_dotenv()
 
-api_key = "nTvaRgasGnuNJQGgROOqfZ6FPDH3iYFWtfflyBHrKR0qiDwp3nGOV74SChvIwnlz"
-api_secret = "bLdkbTC8N6YuWcKctCe3h8iqLBU65oQPX0Pgv4Nc4TaymVuncZdPTRyquJlymTVS"
+api_key = ""
+api_secret = ""
 
 # Initialize Logging
 logging.basicConfig(
@@ -791,7 +791,7 @@ def retry_fetch_data_multiprocessing(symbol: str, lookbacks: List[str], client_a
 
     try:
         # Recreate synchronous Client instance in subprocess
-        client = Client(api_key=client_args['nTvaRgasGnuNJQGgROOqfZ6FPDH3iYFWtfflyBHrKR0qiDwp3nGOV74SChvIwnlz'], api_secret=client_args['bLdkbTC8N6YuWcKctCe3h8iqLBU65oQPX0Pgv4Nc4TaymVuncZdPTRyquJlymTVS'], tld='us')
+        client = Client(api_key=client_args[''], api_secret=client_args[''], tld='us')
         for lb in lookbacks:
             klines = client.get_historical_klines(symbol, interval, lb)
             if klines and len(klines) >= 60:
