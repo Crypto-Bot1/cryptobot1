@@ -60,8 +60,8 @@ tracemalloc.start()
 # Load environment variables from .env file
 load_dotenv()
 
-api_key = "apikeyshere:)"
-api_secret = "apikeyshere:)"
+api_key = "nTvaRgasGnuNJQGgROOqfZ6FPDH3iYFWtfflyBHrKR0qiDwp3nGOV74SChvIwnlz"
+api_secret = "bLdkbTC8N6YuWcKctCe3h8iqLBU65oQPX0Pgv4Nc4TaymVuncZdPTRyquJlymTVS"
 
 # Initialize Logging
 logging.basicConfig(
@@ -776,211 +776,35 @@ from tqdm import tqdm
 # Define a global function for retrying fetch data
 def retry_fetch_data_multiprocessing(symbol: str, lookbacks: List[str], client_args: Dict, interval: str) -> Dict[str, List[float]]:
     """
-    Retry fetching data for a single symbol with multiple lookback periods in multiprocessing.
+    Retry fetching data for a single symbol with multiple lookback periods using synchronous Client.
+
     Args:
         symbol (str): Trading pair symbol.
         lookbacks (List[str]): List of lookback periods.
-        client_args (Dict): Arguments to recreate AsyncClient if needed (e.g., API keys).
+        client_args (Dict): Arguments to recreate Client (e.g., API keys).
         interval (str): Kline interval.
+
     Returns:
         Dict[str, List[float]]: Symbol and its closing prices if successful, otherwise an empty dictionary.
     """
-    from binance import AsyncClient
+    from binance import Client
 
     try:
-        # Recreate client instance in subprocess (if needed)
-        client = AsyncClient(**client_args)
+        # Recreate synchronous Client instance in subprocess
+        client = Client(api_key=client_args['nTvaRgasGnuNJQGgROOqfZ6FPDH3iYFWtfflyBHrKR0qiDwp3nGOV74SChvIwnlz'], api_secret=client_args['bLdkbTC8N6YuWcKctCe3h8iqLBU65oQPX0Pgv4Nc4TaymVuncZdPTRyquJlymTVS'], tld='us')
         for lb in lookbacks:
-            klines = asyncio.run(safe_api_call(client.get_historical_klines, symbol, interval, lb))
+            klines = client.get_historical_klines(symbol, interval, lb)
             if klines and len(klines) >= 60:
-                return {symbol: [float(kline[4]) for kline in klines]}
+                # Extract closing prices
+                closing_prices = [float(kline[4]) for kline in klines]
+                client.close_connection()
+                return {symbol: closing_prices}
+            else:
+                logging.warning(f"Retry {lb} for {symbol} returned insufficient data.")
+        client.close_connection()
     except Exception as e:
         logging.warning(f"Retry error for {symbol} with lookbacks {lookbacks}: {e}")
     return {}
-
-# Updated neural_data_fetch function
-import asyncio
-import logging
-from typing import List, Dict
-from concurrent.futures import ProcessPoolExecutor
-from functools import partial
-from aiolimiter import AsyncLimiter
-from tqdm.asyncio import tqdm_asyncio  # Async-compatible tqdm
-from binance import AsyncClient, Client  # Import synchronous Client for multiprocessing
-import time
-import os
-
-# Ensure CONFIG is defined with 'api_key' and 'api_secret'
-CONFIG = {
-    "api_key": "your_api_key_here",
-    "api_secret": "your_api_secret_here",
-    # ... other configurations
-}
-
-def retry_fetch_data_multiprocessing(symbol: str, lookbacks: List[str], api_key: str, api_secret: str, interval: str) -> Dict[str, List[float]]:
-    """
-    Retry fetching data for a single symbol with multiple lookback periods using synchronous Client.
-    
-    Args:
-        symbol (str): Trading pair symbol.
-        lookbacks (List[str]): List of lookback periods.
-        api_key (str): Binance API key.
-        api_secret (str): Binance API secret.
-        interval (str): Kline interval.
-    
-    Returns:
-        Dict[str, List[float]]: Symbol and its closing prices if successful, otherwise an empty dictionary.
-    """
-    try:
-        client_sync = Client(api_key, api_secret, tld="us")
-        for lb in lookbacks:
-            klines = client_sync.get_historical_klines(symbol, interval, lb)
-            if klines and len(klines) >= 60:
-                client_sync.close()
-                return {symbol: [float(kline[4]) for kline in klines]}
-            else:
-                logging.warning(f"Retry {lb} for {symbol} returned insufficient data.")
-        client_sync.close()
-    except Exception as e:
-        logging.error(f"Multiprocessing fetch error for {symbol}: {e}")
-    return {}
-
-async def dynamic_rate_limiter(rate_limiter: AsyncLimiter, symbol: str, success: bool):
-    """
-    Adjust the rate limiter based on the success or failure of API calls.
-    
-    Args:
-        rate_limiter (AsyncLimiter): The rate limiter instance.
-        symbol (str): Trading pair symbol.
-        success (bool): Whether the API call was successful.
-    
-    Returns:
-        None
-    """
-    if success:
-        # If successful, you might increase the rate limit slightly
-        new_rate = min(rate_limiter._max_rate + 1, 20)  # Cap at 20 req/sec
-        if new_rate != rate_limiter._max_rate:
-            rate_limiter._max_rate = new_rate
-            logging.info(f"Increased rate limit to {new_rate} req/sec.")
-    else:
-        # If failed, reduce the rate limit to prevent further issues
-        new_rate = max(rate_limiter._max_rate - 1, 5)  # Minimum 5 req/sec
-        if new_rate != rate_limiter._max_rate:
-            rate_limiter._max_rate = new_rate
-            logging.info(f"Decreased rate limit to {new_rate} req/sec.")
-
-async def neural_data_fetch(client: AsyncClient, trading_pairs: List[str], interval: str, lookback: str) -> Dict[str, List[float]]:
-    """
-    Advanced adaptive mechanism for fetching historical data with retries, prioritization, and distributed processing.
-    
-    Args:
-        client: Binance AsyncClient instance.
-        trading_pairs: List of trading pair symbols.
-        interval: Kline interval.
-        lookback: Initial lookback period.
-    
-    Returns:
-        Dict[str, List[float]]: Dictionary of symbols and their historical closing prices.
-    """
-    collected_data = {}
-    retry_pairs = []
-    
-    # API Rate limiter (adjust according to Binance API limits)
-    rate_limiter = AsyncLimiter(max_rate=10, time_period=1)  # 10 requests per second
-    
-    async def fetch_data(symbol: str, lookback: str) -> None:
-        """Fetch historical data for a single trading pair."""
-        async with rate_limiter:
-            try:
-                start_time = time.time()
-                klines = await safe_api_call(client.get_historical_klines, symbol, interval, lookback)
-                elapsed_time = time.time() - start_time
-                logging.info(f"Fetched data for {symbol} in {elapsed_time:.2f}s")
-    
-                if klines and len(klines) >= 60:
-                    collected_data[symbol] = [float(kline[4]) for kline in klines]  # Closing prices
-                    await dynamic_rate_limiter(rate_limiter, symbol, success=True)
-                else:
-                    retry_pairs.append(symbol)
-                    await dynamic_rate_limiter(rate_limiter, symbol, success=False)
-            except Exception as e:
-                logging.warning(f"Error fetching data for {symbol}: {e}")
-                retry_pairs.append(symbol)
-                await dynamic_rate_limiter(rate_limiter, symbol, success=False)
-    
-    # Fetch data concurrently for initial lookback period
-    logging.info("Starting concurrent data fetching for trading pairs.")
-    tasks = [fetch_data(symbol, lookback) for symbol in trading_pairs]
-    await tqdm_asyncio.gather(*tasks, desc="Fetching data", total=len(trading_pairs))
-    
-    # Define extended lookback periods for retries
-    extended_lookbacks = ["3 days ago UTC", "7 days ago UTC", "15 days ago UTC"]
-    
-    async def process_retries_with_multiprocessing(symbols: List[str], lookbacks: List[str], api_key: str, api_secret: str, interval: str) -> Dict[str, List[float]]:
-        """Use multiprocessing to handle retries for better performance."""
-        collected_retry_data = {}
-        with ProcessPoolExecutor() as executor:
-            loop = asyncio.get_event_loop()
-            tasks = [
-                loop.run_in_executor(
-                    executor,
-                    partial(retry_fetch_data_multiprocessing, symbol, lookbacks, api_key, api_secret, interval)
-                )
-                for symbol in symbols
-            ]
-            results = await asyncio.gather(*tasks)
-            for result in results:
-                if result:  # If a symbol successfully fetches data
-                    collected_retry_data.update(result)
-        return collected_retry_data
-    
-    if retry_pairs:
-        logging.info("Retrying insufficient data fetches with multiprocessing.")
-        # Retrieve API credentials from CONFIG
-        api_key = CONFIG.get("api_key")
-        api_secret = CONFIG.get("api_secret")
-        if not api_key or not api_secret:
-            logging.error("API key or secret not found in CONFIG. Cannot perform retries.")
-        else:
-            retry_data = await process_retries_with_multiprocessing(retry_pairs, extended_lookbacks, api_key, api_secret, interval)
-            collected_data.update(retry_data)
-            # Remove successfully fetched symbols from retry_pairs
-            retry_pairs = [symbol for symbol in retry_pairs if symbol not in retry_data]
-    
-    # Advanced Error Handling: Exponential Backoff for Retries
-    MAX_RETRIES = 3
-    backoff_factor = 2
-    initial_delay = 1  # seconds
-    
-    for retry in range(MAX_RETRIES):
-        if not retry_pairs:
-            break
-        logging.info(f"Starting retry attempt {retry + 1} for remaining symbols.")
-        current_delay = initial_delay * (backoff_factor ** retry)
-        await asyncio.sleep(current_delay)
-        temp_retry_pairs = retry_pairs.copy()
-        retry_pairs = []
-        if temp_retry_pairs:
-            if not api_key or not api_secret:
-                logging.error("API key or secret not found in CONFIG during retries. Skipping further retries.")
-                break
-            retry_data = await process_retries_with_multiprocessing(temp_retry_pairs, extended_lookbacks, api_key, api_secret, interval)
-            collected_data.update(retry_data)
-            # Remove successfully fetched symbols from retry_pairs
-            retry_pairs = [symbol for symbol in temp_retry_pairs if symbol not in retry_data]
-    
-    # Final check after all retries
-    if retry_pairs:
-        logging.error(f"Failed to fetch sufficient data for symbols after all retries: {retry_pairs}")
-        # Self-Healing: Notify or handle the failure accordingly
-        await send_alert(f"Failed to fetch sufficient data for symbols after retries: {retry_pairs}")
-        # Optionally, implement logic to remove or flag these symbols for further review
-    else:
-        logging.info("Successfully fetched data for all trading pairs after retries.")
-    
-    return collected_data
-
 
 
 
